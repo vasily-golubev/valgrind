@@ -1,0 +1,109 @@
+Index: coregrind/m_syswrap/syswrap-x86-linux.c
+===================================================================
+--- coregrind/m_syswrap/syswrap-x86-linux.c	(revision 13458)
++++ coregrind/m_syswrap/syswrap-x86-linux.c	(revision 13459)
+@@ -1826,7 +1826,7 @@
+ 
+    LINXY(__NR_prlimit64,         sys_prlimit64),        // 340
+    LINXY(__NR_name_to_handle_at, sys_name_to_handle_at),// 341
+-//   LINX_(__NR_open_by_handle_at, sys_ni_syscall),       // 342
++   LINXY(__NR_open_by_handle_at, sys_open_by_handle_at),// 342
+ //   LINX_(__NR_clock_adjtime,     sys_ni_syscall),       // 343
+ //   LINX_(__NR_syncfs,            sys_ni_syscall),       // 344
+ 
+Index: coregrind/m_syswrap/syswrap-linux.c
+===================================================================
+--- coregrind/m_syswrap/syswrap-linux.c	(revision 13458)
++++ coregrind/m_syswrap/syswrap-linux.c	(revision 13459)
+@@ -4408,19 +4408,47 @@
+    PRINT("sys_name_to_handle_at ( %ld, %#lx(%s), %#lx, %#lx, %ld )", ARG1, ARG2, (char*)ARG2, ARG3, ARG4, ARG5);
+    PRE_REG_READ5(int, "name_to_handle_at",
+                  int, dfd, const char *, name,
+-                 struct vki_file_handle, handle,
++                 struct vki_file_handle *, handle,
+                  int *, mnt_id, int, flag);
+    PRE_MEM_RASCIIZ( "name_to_handle_at(name)", ARG2 );
+-   PRE_MEM_WRITE( "name_to_handle_at(handle)", ARG3, sizeof(struct vki_file_handle) + ((struct vki_file_handle*)ARG3)->handle_bytes );
++   if (ML_(safe_to_deref)( (void*)ARG3, sizeof(struct vki_file_handle))) {
++      struct vki_file_handle *fh = (struct vki_file_handle *)ARG3;
++      PRE_MEM_READ( "name_to_handle_at(handle)", (Addr)&fh->handle_bytes, sizeof(fh->handle_bytes) );
++      PRE_MEM_WRITE( "name_to_handle_at(handle)", (Addr)fh, sizeof(struct vki_file_handle) + fh->handle_bytes );
++   }
+    PRE_MEM_WRITE( "name_to_handle_at(mnt_id)", ARG4, sizeof(int) );
+ }
+ 
+ POST(sys_name_to_handle_at)
+ {
+-   POST_MEM_WRITE( ARG3, sizeof(struct vki_file_handle) + ((struct vki_file_handle*)ARG3)->handle_bytes );
++   struct vki_file_handle *fh = (struct vki_file_handle *)ARG3;
++   POST_MEM_WRITE( ARG3, sizeof(struct vki_file_handle) + fh->handle_bytes );
+    POST_MEM_WRITE( ARG4, sizeof(int) );
+ }
+ 
++PRE(sys_open_by_handle_at)
++{
++   *flags |= SfMayBlock;
++   PRINT("sys_open_by_handle_at ( %ld, %#lx, %ld )", ARG1, ARG2, ARG3);
++   PRE_REG_READ3(int, "open_by_handle_at",
++                 int, mountdirfd,
++                 struct vki_file_handle *, handle,
++                 int, flags);
++   PRE_MEM_READ( "open_by_handle_at(handle)", ARG2, sizeof(struct vki_file_handle) + ((struct vki_file_handle*)ARG2)->handle_bytes );
++}
++
++POST(sys_open_by_handle_at)
++{
++   vg_assert(SUCCESS);
++   if (!ML_(fd_allowed)(RES, "open_by_handle_at", tid, True)) {
++      VG_(close)(RES);
++      SET_STATUS_Failure( VKI_EMFILE );
++   } else {
++      if (VG_(clo_track_fds))
++         ML_(record_fd_open_with_given_name)(tid, RES, (HChar*)ARG2);
++   }
++}
++
+ /* ---------------------------------------------------------------------
+    p{read,write}v wrappers
+    ------------------------------------------------------------------ */
+Index: coregrind/m_syswrap/priv_syswrap-linux.h
+===================================================================
+--- coregrind/m_syswrap/priv_syswrap-linux.h	(revision 13458)
++++ coregrind/m_syswrap/priv_syswrap-linux.h	(revision 13459)
+@@ -176,6 +176,7 @@
+ DECL_TEMPLATE(linux, sys_faccessat);
+ DECL_TEMPLATE(linux, sys_utimensat);
+ DECL_TEMPLATE(linux, sys_name_to_handle_at);
++DECL_TEMPLATE(linux, sys_open_by_handle_at);
+ 
+ DECL_TEMPLATE(linux, sys_add_key);
+ DECL_TEMPLATE(linux, sys_request_key);
+Index: coregrind/m_syswrap/syswrap-amd64-linux.c
+===================================================================
+--- coregrind/m_syswrap/syswrap-amd64-linux.c	(revision 13458)
++++ coregrind/m_syswrap/syswrap-amd64-linux.c	(revision 13459)
+@@ -1072,7 +1072,7 @@
+ //   LINX_(__NR_fanotify_mark,     sys_ni_syscall),       // 301
+    LINXY(__NR_prlimit64,         sys_prlimit64),        // 302
+    LINXY(__NR_name_to_handle_at, sys_name_to_handle_at),// 303
+-//   LINX_(__NR_open_by_handle_at, sys_ni_syscall),       // 304
++   LINXY(__NR_open_by_handle_at, sys_open_by_handle_at),// 304
+ 
+ //   LINX_(__NR_clock_adjtime,     sys_ni_syscall),       // 305
+ //   LINX_(__NR_syncfs,            sys_ni_syscall),       // 306
+Index: coregrind/m_syswrap/syswrap-arm-linux.c
+===================================================================
+--- coregrind/m_syswrap/syswrap-arm-linux.c	(revision 13458)
++++ coregrind/m_syswrap/syswrap-arm-linux.c	(revision 13459)
+@@ -1221,7 +1221,10 @@
+    LINXY(__NR_rt_tgsigqueueinfo, sys_rt_tgsigqueueinfo),// 363
+    LINXY(__NR_perf_event_open,   sys_perf_event_open),  // 364
+ 
+-   LINXY(__NR_accept4,           sys_accept4)           // 366
++   LINXY(__NR_accept4,           sys_accept4),          // 366
++
++   LINXY(__NR_name_to_handle_at, sys_name_to_handle_at),// 370
++   LINXY(__NR_open_by_handle_at, sys_open_by_handle_at) // 371
+ };
+ 
+ 
