@@ -1,0 +1,139 @@
+Index: coregrind/m_main.c
+===================================================================
+--- coregrind/m_main.c	(revision 13656)
++++ coregrind/m_main.c	(revision 13657)
+@@ -212,6 +212,11 @@
+ "                  in the main exe:  --soname-synonyms=somalloc=NONE\n"
+ "                  in libxyzzy.so:   --soname-synonyms=somalloc=libxyzzy.so\n"
+ "    --sigill-diagnostics=yes|no  warn about illegal instructions? [yes]\n"
++"    --unw-stack-scan-thresh=<number>   Enable stack-scan unwind if fewer\n"
++"                  than <number> good frames found  [0, meaning \"disabled\"]\n"
++"                  NOTE: stack scanning is only available on arm-linux.\n"
++"    --unw-stack-scan-frames=<number>   Max number of frames that can be\n"
++"                  recovered by stack scanning [5]\n"
+ "\n";
+ 
+    const HChar usage2[] = 
+@@ -798,6 +803,11 @@
+       else if VG_XACT_CLO(arg, "--gen-suppressions=all",
+                                VG_(clo_gen_suppressions), 2) {}
+ 
++      else if VG_BINT_CLO(arg, "--unw-stack-scan-thresh",
++                          VG_(clo_unw_stack_scan_thresh), 0, 100) {}
++      else if VG_BINT_CLO(arg, "--unw-stack-scan-frames",
++                          VG_(clo_unw_stack_scan_frames), 0, 32) {}
++
+       else if ( ! VG_(needs).command_line_options
+              || ! VG_TDICT_CALL(tool_process_cmd_line_option, arg) ) {
+          VG_(fmsg_bad_option)(arg, "");
+Index: coregrind/m_stacktrace.c
+===================================================================
+--- coregrind/m_stacktrace.c	(revision 13656)
++++ coregrind/m_stacktrace.c	(revision 13657)
+@@ -957,6 +957,7 @@
+    /* Loop unwinding the stack. */
+    Bool do_stack_scan = False;
+ 
++   /* First try the Official Way, using Dwarf CFI. */
+    while (True) {
+       if (debug) {
+          VG_(printf)("i: %d, r15: 0x%lx, r13: 0x%lx\n",
+@@ -977,12 +978,17 @@
+          if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+          continue;
+       }
++
+       /* No luck.  We have to give up. */
+       do_stack_scan = True;
+       break;
+    }
+ 
+-   if (0/*DISABLED BY DEFAULT*/ && do_stack_scan && i < max_n_ips && i <= 2) {
++   /* Now try Plan B (maybe) -- stack scanning.  This often gives
++      pretty bad results, so this has to be enabled explicitly by the
++      user. */
++   if (do_stack_scan
++       && i < max_n_ips && i < (Int)VG_(clo_unw_stack_scan_thresh)) {
+       Int  nByStackScan = 0;
+       Addr lr = uregs.r14;
+       Addr sp = uregs.r13 & ~3;
+@@ -1015,7 +1021,7 @@
+                if (fps) fps[i] = 0;
+                ips[i++] = cand;
+                if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+-               if (++nByStackScan >= 5) break;
++               if (++nByStackScan >= VG_(clo_unw_stack_scan_frames)) break;
+             }
+          }
+          sp += 4;
+Index: coregrind/m_options.c
+===================================================================
+--- coregrind/m_options.c	(revision 13656)
++++ coregrind/m_options.c	(revision 13657)
+@@ -125,7 +125,10 @@
+ const HChar* VG_(clo_kernel_variant) = NULL;
+ Bool   VG_(clo_dsymutil)       = False;
+ Bool   VG_(clo_sigill_diag)    = True;
++UInt   VG_(clo_unw_stack_scan_thresh) = 0; /* disabled by default */
++UInt   VG_(clo_unw_stack_scan_frames) = 5;
+ 
++
+ /*====================================================================*/
+ /*=== File expansion                                               ===*/
+ /*====================================================================*/
+Index: coregrind/pub_core_options.h
+===================================================================
+--- coregrind/pub_core_options.h	(revision 13656)
++++ coregrind/pub_core_options.h	(revision 13657)
+@@ -318,6 +318,19 @@
+    depends on verbosity (False if -q). */
+ extern Bool VG_(clo_sigill_diag);
+ 
++/* Unwind using stack scanning (a nasty hack at the best of times)
++   when the normal CFI/FP-chain scan fails.  If the number of
++   "normally" recovered frames is below this number, stack scanning
++   will be used (on platforms on which it is supported, currently only
++   arm-linux).  The default value of zero has the effect of disabling
++   stack scanning.  Default: zero*/
++extern UInt VG_(clo_unw_stack_scan_thresh);
++
++/* If stack scanning is used, this is how many frames it may recover.
++   Since it tends to pick up a lot of junk, this value is set pretty
++   low by default.  Default: 5 */
++extern UInt VG_(clo_unw_stack_scan_frames);
++
+ #endif   // __PUB_CORE_OPTIONS_H
+ 
+ /*--------------------------------------------------------------------*/
+Index: none/tests/cmdline2.stdout.exp
+===================================================================
+--- none/tests/cmdline2.stdout.exp	(revision 13656)
++++ none/tests/cmdline2.stdout.exp	(revision 13657)
+@@ -100,6 +100,11 @@
+                   in the main exe:  --soname-synonyms=somalloc=NONE
+                   in libxyzzy.so:   --soname-synonyms=somalloc=libxyzzy.so
+     --sigill-diagnostics=yes|no  warn about illegal instructions? [yes]
++    --unw-stack-scan-thresh=<number>   Enable stack-scan unwind if fewer
++                  than <number> good frames found  [0, meaning "disabled"]
++                  NOTE: stack scanning is only available on arm-linux.
++    --unw-stack-scan-frames=<number>   Max number of frames that can be
++                  recovered by stack scanning [5]
+ 
+   user options for Nulgrind:
+     (none)
+Index: none/tests/cmdline1.stdout.exp
+===================================================================
+--- none/tests/cmdline1.stdout.exp	(revision 13656)
++++ none/tests/cmdline1.stdout.exp	(revision 13657)
+@@ -100,6 +100,11 @@
+                   in the main exe:  --soname-synonyms=somalloc=NONE
+                   in libxyzzy.so:   --soname-synonyms=somalloc=libxyzzy.so
+     --sigill-diagnostics=yes|no  warn about illegal instructions? [yes]
++    --unw-stack-scan-thresh=<number>   Enable stack-scan unwind if fewer
++                  than <number> good frames found  [0, meaning "disabled"]
++                  NOTE: stack scanning is only available on arm-linux.
++    --unw-stack-scan-frames=<number>   Max number of frames that can be
++                  recovered by stack scanning [5]
+ 
+   user options for Nulgrind:
+     (none)
