@@ -1,0 +1,36 @@
+Index: none/tests/arm/ldrt.stdout.exp
+===================================================================
+--- none/tests/arm/ldrt.stdout.exp	(revision 13400)
++++ none/tests/arm/ldrt.stdout.exp	(working copy)
+@@ -1,2 +1,7 @@
+ result is 0x87868584 (should be 0x87868584)
+ result is 131 200 150 100 10 136 (should be 131 200 150 100 10 136)
++result is 4294967232 (should be 4294967232)
+Index: none/tests/arm/ldrt.c
+===================================================================
+--- none/tests/arm/ldrt.c	(revision 13400)
++++ none/tests/arm/ldrt.c	(working copy)
+@@ -26,6 +26,48 @@
+   );
+ }
++__attribute__((noinline)) void do_ldrsb (UInt* res)
++{
++  __asm__ __volatile__(
++     "mov r4, %1 ; addr_ldrsb: movt r5, $255 ; ldrsb r6, addr_ldrsb ; str r6, [r4, #0]"
++     : "+r"(res) : : "r4", "r5", "r6", "memory"
++  );
++}
++
+ int main ( void )
+ {
+   UInt i;
+@@ -43,5 +85,30 @@
+          c[131], c[132], c[133], c[134], c[135], c[136],
+          131, 200, 150, 100, 10, 136);
+   free(c);
++
++  UInt val_ldrsb = 0xAAAAAAAA;
++  do_ldrsb(&val_ldrsb);
++  printf("result is %u (should be %u)\n", val_ldrsb, 0xFFFFFFC0);
+   return 0;
+ }

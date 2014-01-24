@@ -1,0 +1,29 @@
+Index: none/tests/arm/ldrt.stdout.exp
+===================================================================
+--- none/tests/arm/ldrt.stdout.exp	(revision 13400)
++++ none/tests/arm/ldrt.stdout.exp	(working copy)
+@@ -1,2 +1,8 @@
++result is 4294967294 (should be 4294967294)
++result is 61519 (should be 61519)
+Index: none/tests/arm/ldrt.c
+===================================================================
+--- none/tests/arm/ldrt.c	(revision 13400)
++++ none/tests/arm/ldrt.c	(working copy)
+@@ -26,6 +26,66 @@
+   );
+ }
++
++__attribute__((noinline)) void do_ldrh (UInt* res)
++{
++  __asm__ __volatile__(
++     "mov r4, %1 ; addr_ldrh: mov r5, $11; ldrh r6, addr_ldrh ; str r6, [r4, #0];"
++     : "+r"(res) : : "r4", "r5", "r6", "memory"
++  );
++}
++
++  UInt val_ldrh = 0xFFFFFFFF;
++  do_ldrh(&val_ldrh);
++  printf("result is %u (should be %u)\n", val_ldrh, 61519);
++
+   return 0;
+ }

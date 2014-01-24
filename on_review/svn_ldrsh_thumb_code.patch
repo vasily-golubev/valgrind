@@ -1,0 +1,45 @@
+Index: VEX/priv/guest_arm_toIR.c
+===================================================================
+--- VEX/priv/guest_arm_toIR.c	(revision 2722)
++++ VEX/priv/guest_arm_toIR.c	(working copy)
+@@ -18717,6 +18717,170 @@
+       }
+    }
++
++   /* --------------LDRSH (literal)------------------------*/
++   /* Load Register Signed Halfword (literal):
++         ldrsh  Rt, [PC, #+/-imm12]
++   */
++   if (INSN0(15,8) == BITS8(1,1,1,1,1,0,0,1) && INSN0(6,0) == BITS7(0,1,1,1,1,1,1)) {
++      UInt rT = INSN1(15,12);
++      
++      if (rT == 15) {
++         /* In this case our instruction is Unallocated memory hint (treat as NOP).*/
++         DIP("nop\n");
++         goto decode_success;
++      }
++
++      UInt imm12 = INSN1(11,0);
++      UInt bU    = INSN0(7,7);
++      Bool valid = True;
++      if (rT == 13)
++         valid = False;
++
++      if (valid) {
++         put_ITSTATE(old_itstate);
++         IRTemp addr = newTemp(Ity_I32);
++         assign(addr, binop(bU == 1 ? Iop_Add32 : Iop_Sub32,
++                            binop(Iop_And32, getIRegT(15), mkU32(~3U)),
++                            mkU32(imm12)));
++         IRTemp llOldRt = newTemp(Ity_I32);
++         assign(llOldRt, llGetIReg(rT));
++         IRTemp newRt = newTemp(Ity_I32);
++         loadGuardedLE(newRt, ILGop_16Sto32, mkexpr(addr), mkexpr(llOldRt), condT);
++         putIRegT(rT, mkexpr(newRt), IRTemp_INVALID);
++         put_ITSTATE(new_itstate);
++
++         DIP("ldrsh r%u, [PC, #%c%u]\n", rT, bU == 1 ? '+' : '-', imm12);
++
++         goto decode_success;
++      }
++   }

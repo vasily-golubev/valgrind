@@ -1,0 +1,53 @@
+Index: VEX/priv/guest_arm_toIR.c
+===================================================================
+--- VEX/priv/guest_arm_toIR.c	(revision 2778)
++++ VEX/priv/guest_arm_toIR.c	(working copy)
+@@ -20399,6 +20399,48 @@
+       }
+    }
+ 
++   /* --------------LDRH (literal)------------------------*/
++   /* Load Register Halfword (literal):
++         ldrh  Rt, [PC, #+/-imm12]
++   */
++   if (INSN0(15,8) == BITS8(1,1,1,1,1,0,0,0) && INSN0(6,0) == BITS7(0,1,1,1,1,1,1)) {
++      UInt rT = INSN1(15,12);
++
++      if (rT == 15) {
++         /* In this case our instruction is PLD (literal), in fact:
++            pld [PC, #+/-<imm>]
++         */
++         UInt bU = INSN0(7,7);
++         UInt imm12 = INSN1(11,0);
++         DIP("pld [PC, #%c%u]\n", bU == 1 ? '+' : '-', imm12);
++         goto decode_success;
++      }
++
++      UInt imm12 = INSN1(11,0);
++      UInt bU    = INSN0(7,7);
++      Bool valid = True;
++      if (rT == 13)
++         valid = False;
++
++      if (valid) {
++         put_ITSTATE(old_itstate);
++         IRTemp addr = newTemp(Ity_I32);
++         assign(addr, binop(bU == 1 ? Iop_Add32 : Iop_Sub32,
++                            binop(Iop_And32, getIRegT(15), mkU32(~3U)),
++                            mkU32(imm12)));
++         IRTemp llOldRt = newTemp(Ity_I32);
++         assign(llOldRt, llGetIReg(rT));
++         IRTemp newRt = newTemp(Ity_I32);
++         loadGuardedLE(newRt, ILGop_16Uto32, mkexpr(addr), mkexpr(llOldRt), condT);
++         putIRegT(rT, mkexpr(newRt), IRTemp_INVALID);
++         put_ITSTATE(new_itstate);
++
++         DIP("ldrh r%u, [PC, #%c%u]\n", rT, bU == 1 ? '+' : '-', imm12);
++
++         goto decode_success;
++      }
++   }
++
+    /* -------------- LDRD/STRD reg+/-#imm8 -------------- */
+    /* Doubleword loads and stores of the form:
+          ldrd/strd  Rt, Rt2, [Rn, #-imm8]      or
